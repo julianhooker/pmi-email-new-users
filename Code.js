@@ -21,67 +21,74 @@ function myFunction() {
 
   var emailMessage = DocumentApp.openById(newMemberMessageDocumentId);
   var attachment = DriveApp.getFileById(newMemberMessageDocumentAttachmentId);
+
+
   var reportEmailFound = false;
 
-  // Open the "Sent - New Member Email" spreadsheet once and cache its data to avoid repeated opens
-  var pastNotificationsSheet = SpreadsheetApp.openById(pastNotificationsSpreadsheetFileId);
-  var pastData = pastNotificationsSheet.getDataRange().getValues();
-
   // if there was an email from ThoughtSpot for the new members, we will process it
-  for (var t = 0; t < threads.length; t++) {
+  for (var i = 0; i < threads.length; i++) {
     reportEmailFound = true;
 
-    var messages = threads[t].getMessages();
+    var messages = threads[i].getMessages();
 
-    // Iterate messages
-    for (var m = 0; m < messages.length; m++) {
-      var attachments = messages[m].getAttachments();
+    // Let's get the messages
+    for (var i = 0; i < messages.length; i++) {
+      var attachments = messages[i].getAttachments();
 
-      // Iterate attachments
-      for (var a = 0; a < attachments.length; a++) {
-        var dataExtract = Utilities.parseCsv(attachments[a].getDataAsString());
+      // Let's get the attachment from the message
+      for (var i = 0; i < attachments.length; i++) {
+        var dataExtract = Utilities.parseCsv(attachments[i].getDataAsString());
 
-        // Just checking to see if this is a data extract from ThoughtSpot. If not, skip this attachment
-        if (!dataExtract || !dataExtract[0] || dataExtract[0][0].indexOf("Data extract produced by") == -1) continue;
+        // Just checking to see if this is a data extract from ThoughtSpot. If not, stop executing
+        if (dataExtract[0][0].indexOf("Data extract produced by") == -1) break;
 
-        // Find the start of the actual data (skip header). The original logic mutated loop counters and could run past the array bounds.
-        var startIndex = 0;
-        while (startIndex < dataExtract.length && dataExtract[startIndex][0] !== '') {
-          startIndex++;
-        }
-        // Move past the blank line and the column titles row if possible
-        startIndex = Math.min(dataExtract.length, startIndex + 2);
+        // Open the "Sent - New Member Email" spreadsheet. This keeps track of who has already been send the new memeber email
+        var pastNotificationsSheet = SpreadsheetApp.openById(pastNotificationsSpreadsheetFileId);
+        var data = pastNotificationsSheet.getDataRange().getValues();
 
-        for (var r = startIndex; r < dataExtract.length; r++) {
-          var row = dataExtract[r];
-          if (!row || row.length <= emailPosition) continue;
+        var processingHeader = true;
+        for (var i = 0; i < dataExtract.length; i++) {
+          while (processingHeader) {
+            if (dataExtract[i][0] == '') {
+              // found the blank end of the header
+              i++; // Move past the blank line
+              i++; // Move past the row with the column titles in it
 
-          var email = row[emailPosition];
-          if (!email || email.toString().trim() === '') continue;
+              processingHeader = false;
+            } else {
+              i++
+            }
+          }
 
-          if (memberNotifiedPreviously(email, pastData)) {
-            peopleNotNotified.push(email);
+          // Logger.log('First Name: ' + dataExtract[i][firstNamePosition]);
+          // Logger.log('Last Name: ' + dataExtract[i][lastNamePosition]);
+          // Logger.log('Email Address: ' + dataExtract[i][emailPosition]);
+          // Logger.log('Joined: ' + dataExtract[i][joinDatePosition]);
+
+          if (memberNotifiedPreviously(dataExtract[i][emailPosition])) {
+            //Logger.log("Email address " + dataExtract[i][emailPosition] + " is in the spreadsheet");
+
+            peopleNotNotified.push(dataExtract[i][emailPosition]);
           } else {
-            var body = emailMessage.getText().replace("<first name>", row[firstNamePosition]);
+              var body = emailMessage.getText().replace("<first name>", dataExtract[i][firstNamePosition]);
 
-            // Send email to the new member
-            GmailApp.sendEmail(email, 'Welcome to the PMI West Texas Chapter!', body, {
-                attachments: [attachment],
-                htmlBody: body,
-                name: 'PMI West Texas'
-              });
+              // This will email to the new members
 
-            var formattedDate = Utilities.formatDate(new Date(), Session.getScriptTimeZone ? Session.getScriptTimeZone() : "GMT+1", "MM/dd/yyyy");
-            pastNotificationsSheet.appendRow([row[firstNamePosition], row[lastNamePosition], row[emailPosition], row[joinDatePosition], formattedDate]);
+              //Logger.log("Would have emailed " + dataExtract[i][emailPosition])
+              GmailApp.sendEmail(dataExtract[i][emailPosition], 'Welcome to the PMI West Texas Chapter!', body, {
+                  attachments: [attachment],
+                  htmlBody: body,
+                  name: 'PMI West Texas'
+                });
 
-            // Keep in-memory summary up-to-date so subsequent checks in this run see the new entry
-            pastData.push([row[firstNamePosition], row[lastNamePosition], row[emailPosition], row[joinDatePosition], formattedDate]);
+              pastNotificationsSheet
+              .appendRow([dataExtract[i][firstNamePosition], dataExtract[i][lastNamePosition], dataExtract[i][emailPosition], dataExtract[i][joinDatePosition], Utilities.formatDate(new Date(), "GMT+1", "MM/dd/yyyy")]);
 
-            peopleWeEmailed.push(email);
+              peopleWeEmailed.push(dataExtract[i][emailPosition]);
           }
         }
       }
-    }
+    } 
   }
 
   Logger.log("reportEmailFound " + reportEmailFound);
@@ -128,20 +135,12 @@ function myFunction() {
   }
 }
 
-function memberNotifiedPreviously(email, pastData) {
-    // pastData: optional cached 2D array of rows from the past notifications sheet
-    var data = pastData;
-    if (!data) {
-      var pastNotificationsSheet = SpreadsheetApp.openById(pastNotificationsSpreadsheetFileId);
-      data = pastNotificationsSheet.getDataRange().getValues();
-    }
-
-    if (!email) return false;
-    var target = email.toString().trim().toUpperCase();
+function memberNotifiedPreviously(email, pastNotificationsSheet) {
+    var pastNotificationsSheet = SpreadsheetApp.openById(pastNotificationsSpreadsheetFileId);
+    var data = pastNotificationsSheet.getDataRange().getValues();
 
     for (var i = 0; i < data.length; i++) {
-      var rowEmail = (data[i] && data[i][2]) ? data[i][2].toString().trim().toUpperCase() : '';
-      if (target === rowEmail) return true; // found the email address in the sheet
+      if (email.trim().toUpperCase() == data[i][2].trim().toUpperCase()) return true; // found the email address in the sheet
     }
 
     return false; // did not find the email address in the sheet
