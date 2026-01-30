@@ -10,13 +10,21 @@ var emailPosition = 5;
 
 var peopleWeEmailed = [];
 var peopleNotNotified = [];
+// Set to true to redirect all outgoing member emails to `TEST_RECIPIENT` for safe testing
+var TEST_MODE = false;
+var TEST_RECIPIENT = 'membership@pmiwtx.org';
+
+// Conditional logger: only logs when TEST_MODE is true
+function log(message) {
+  if (TEST_MODE) Logger.log(message);
+}
 
 function myFunction() {
-  Logger.log ("Starting Execution");
+  log("Starting Execution");
 
-  var threads = GmailApp.search('subject:"' + thoughtspotMessageTitle + '"');
+  var threads = GmailApp.search('in:inbox subject:"' + thoughtspotMessageTitle + '"');
 
-  Logger.log("Number of messages found: " + threads.length)
+  log("Number of messages found: " + threads.length)
  
 
   var emailMessage = DocumentApp.openById(newMemberMessageDocumentId);
@@ -26,18 +34,21 @@ function myFunction() {
   var reportEmailFound = false;
 
   // if there was an email from ThoughtSpot for the new members, we will process it
-  for (var i = 0; i < threads.length; i++) {
+  for (var tIdx = 0; tIdx < threads.length; tIdx++) {
     reportEmailFound = true;
+    log('Processing thread ' + tIdx + ' of ' + threads.length);
 
-    var messages = threads[i].getMessages();
+    var messages = threads[tIdx].getMessages();
 
     // Let's get the messages
-    for (var i = 0; i < messages.length; i++) {
-      var attachments = messages[i].getAttachments();
+    for (var mIdx = 0; mIdx < messages.length; mIdx++) {
+      log(' Processing message ' + mIdx + ' of ' + messages.length + ' in thread ' + tIdx);
+      var attachments = messages[mIdx].getAttachments();
 
       // Let's get the attachment from the message
-      for (var i = 0; i < attachments.length; i++) {
-        var dataExtract = Utilities.parseCsv(attachments[i].getDataAsString());
+      for (var aIdx = 0; aIdx < attachments.length; aIdx++) {
+        var dataExtract = Utilities.parseCsv(attachments[aIdx].getDataAsString());
+        log('  Found attachment ' + aIdx + ' with ' + dataExtract.length + ' rows (including header)');
 
         // Just checking to see if this is a data extract from ThoughtSpot. If not, stop executing
         if (dataExtract[0][0].indexOf("Data extract produced by") == -1) break;
@@ -47,51 +58,52 @@ function myFunction() {
         var data = pastNotificationsSheet.getDataRange().getValues();
 
         var processingHeader = true;
-        for (var i = 0; i < dataExtract.length; i++) {
+        for (var r = 0; r < dataExtract.length; r++) {
           while (processingHeader) {
-            if (dataExtract[i][0] == '') {
+            if (dataExtract[r][0] == '') {
               // found the blank end of the header
-              i++; // Move past the blank line
-              i++; // Move past the row with the column titles in it
+              r++; // Move past the blank line
+              r++; // Move past the row with the column titles in it
 
               processingHeader = false;
             } else {
-              i++
+              r++
             }
           }
 
-          // Logger.log('First Name: ' + dataExtract[i][firstNamePosition]);
-          // Logger.log('Last Name: ' + dataExtract[i][lastNamePosition]);
-          // Logger.log('Email Address: ' + dataExtract[i][emailPosition]);
-          // Logger.log('Joined: ' + dataExtract[i][joinDatePosition]);
+          // Logger.log('First Name: ' + dataExtract[r][firstNamePosition]);
+          // Logger.log('Last Name: ' + dataExtract[r][lastNamePosition]);
+          // Logger.log('Email Address: ' + dataExtract[r][emailPosition]);
+          // Logger.log('Joined: ' + dataExtract[r][joinDatePosition]);
 
-          if (memberNotifiedPreviously(dataExtract[i][emailPosition])) {
-            //Logger.log("Email address " + dataExtract[i][emailPosition] + " is in the spreadsheet");
-
-            peopleNotNotified.push(dataExtract[i][emailPosition]);
+          log('   Processing row ' + r + ': email=' + dataExtract[r][emailPosition]);
+          if (memberNotifiedPreviously(dataExtract[r][emailPosition])) {
+            log('    Email already notified previously: ' + dataExtract[r][emailPosition]);
+            peopleNotNotified.push(dataExtract[r][emailPosition]);
           } else {
-              var body = emailMessage.getText().replace("<first name>", dataExtract[i][firstNamePosition]);
+              var body = emailMessage.getText().replace("<first name>", dataExtract[r][firstNamePosition]);
 
               // This will email to the new members
 
-              //Logger.log("Would have emailed " + dataExtract[i][emailPosition])
-              GmailApp.sendEmail(dataExtract[i][emailPosition], 'Welcome to the PMI West Texas Chapter!', body, {
+              //Logger.log("Would have emailed " + dataExtract[r][emailPosition])
+              var recipient = TEST_MODE ? TEST_RECIPIENT : dataExtract[r][emailPosition];
+              GmailApp.sendEmail(recipient, 'Welcome to the PMI West Texas Chapter!', body, {
                   attachments: [attachment],
                   htmlBody: body,
                   name: 'PMI West Texas'
                 });
 
               pastNotificationsSheet
-              .appendRow([dataExtract[i][firstNamePosition], dataExtract[i][lastNamePosition], dataExtract[i][emailPosition], dataExtract[i][joinDatePosition], Utilities.formatDate(new Date(), "GMT+1", "MM/dd/yyyy")]);
+              .appendRow([dataExtract[r][firstNamePosition], dataExtract[r][lastNamePosition], dataExtract[r][emailPosition], dataExtract[r][joinDatePosition], Utilities.formatDate(new Date(), "GMT+1", "MM/dd/yyyy")]);
 
-              peopleWeEmailed.push(dataExtract[i][emailPosition]);
+              peopleWeEmailed.push(dataExtract[r][emailPosition]);
           }
         }
       }
     } 
   }
 
-  Logger.log("reportEmailFound " + reportEmailFound);
+  log("reportEmailFound " + reportEmailFound);
 
   if (reportEmailFound) {
     var notificationMessage = "Just to let you know, a report from ThoughtSpot was found to process today <br /><br />";
@@ -121,13 +133,13 @@ function myFunction() {
       notificationMessage += "There were no people who have already been notified in the report. <br /><br />";
     }
 
-    Logger.log("Sending report email");
+    log("Sending report email");
     GmailApp.sendEmail('membership@pmiwtx.org', 'New Member Notification Report', notificationMessage, {
       htmlBody: notificationMessage,
       name: 'PMI West Texas'
     })
 
-    Logger.log("Deleting original email");
+    log("Deleting original email");
     // now delete that email to keep the inbox clean
     threads.forEach((value) => {
       //value.moveToTrash();
