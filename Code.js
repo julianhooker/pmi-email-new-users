@@ -142,7 +142,7 @@ function myFunction() {
     log("Deleting original email");
     // now delete that email to keep the inbox clean
     threads.forEach((value) => {
-      //value.moveToTrash();
+      value.moveToTrash();
     })
   }
 }
